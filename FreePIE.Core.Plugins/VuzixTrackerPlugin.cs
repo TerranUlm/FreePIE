@@ -9,7 +9,7 @@ namespace FreePIE.Core.Plugins {
    //                          Vuzix (iWearDrv interface)
    //==========================================================================
    static class VuzixAPI {
-   
+
       [DllImport("iWearDrv.dll", SetLastError = false, EntryPoint = "IWROpenTracker", CallingConvention = CallingConvention.Cdecl)]
       public static extern int IWROpenTracker();
 
@@ -44,6 +44,8 @@ namespace FreePIE.Core.Plugins {
    public class VuzixTrackerPlugin : Plugin {
 
       bool Sampled;
+      bool filterState = true;
+      bool isOpen;
       int YawSample;
       int ContinuousYaw;
       int PitchSample;
@@ -51,7 +53,7 @@ namespace FreePIE.Core.Plugins {
       int XSample;
       int YSample;
       int ZSample;
-       
+
       double DataModeScale;
 
       //-----------------------------------------------------------------------
@@ -59,7 +61,7 @@ namespace FreePIE.Core.Plugins {
          SetDataUnits(VuzixDataUnits.DEGREES);
       }
 
-      //----------------------------------------------------------------------- 
+      //-----------------------------------------------------------------------
       public override object CreateGlobal() {
           return new VuzixTrackerPluginGlobal(this);
       }
@@ -69,9 +71,9 @@ namespace FreePIE.Core.Plugins {
          // This method is called just before script starts
          int err = VuzixAPI.IWROpenTracker();
          if (err == 0) {
+            isOpen = true;
             // Turn on Vuzix signal filtering
-            // TODO: Expose this to allow scripts to do their own filtering
-            VuzixAPI.IWRSetFilterState(true); 
+            VuzixAPI.IWRSetFilterState(filterState);
 
             // Grab a single test sample just to make sure everything is linked up properly
             SampleVuzixTracker();
@@ -86,6 +88,7 @@ namespace FreePIE.Core.Plugins {
 
       //-----------------------------------------------------------------------
       public override void Stop() {
+         isOpen = false;
          VuzixAPI.IWRCloseTracker();
       }
 
@@ -112,7 +115,7 @@ namespace FreePIE.Core.Plugins {
 
       //-----------------------------------------------------------------------
       public void SetDataUnits(VuzixDataUnits mode) {
-         
+
          switch (mode) {
             case VuzixDataUnits.RAW:
                DataModeScale = 1.0;
@@ -134,16 +137,27 @@ namespace FreePIE.Core.Plugins {
 
       public bool ContinousYawMode { get; set; }
 
+      public bool FilterState
+      {
+         get { return filterState; }
+         set
+         {
+            filterState = value;
+            if (isOpen)
+               VuzixAPI.IWRSetFilterState(value);
+         }
+      }
+
       //-----------------------------------------------------------------------
       void SampleVuzixTracker() {
-         
+
          int previous_yaw = YawSample;
          VuzixAPI.IWRGet6DTracking(out YawSample, out PitchSample, out RollSample, out XSample, out YSample, out ZSample);
-         
+
          int delta = YawSample - previous_yaw;
          int HALF_CIRCLE = 32768;
          if (Math.Abs(delta) > HALF_CIRCLE) {
-            // We turned across the discontinuity at 180 degrees so modify the delta to 
+            // We turned across the discontinuity at 180 degrees so modify the delta to
             // reflect the probable angular motion
             if (delta > 0)
                delta -= (2 * HALF_CIRCLE);
@@ -166,7 +180,7 @@ namespace FreePIE.Core.Plugins {
                yaw = ContinuousYaw * DataModeScale;
             else
                yaw = YawSample * DataModeScale;
-               
+
             return yaw;
          }
       }
@@ -249,6 +263,12 @@ namespace FreePIE.Core.Plugins {
         {
             get { return vuzix.ContinousYawMode; }
             set { vuzix.ContinousYawMode = value; }
+        }
+
+        public bool filterState
+        {
+            get { return vuzix.FilterState; }
+            set { vuzix.FilterState = value; }
         }
 
         public double yaw
